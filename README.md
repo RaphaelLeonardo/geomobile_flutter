@@ -45,8 +45,6 @@ O GeomobileApp é um aplicativo móvel desenvolvido em Flutter para visualizar c
 
 ### GeoServer
 - **URL**: `http://186.237.132.58:15124/geoserver`
-- **Usuário**: `admin`
-- **Senha**: `geodados`
 - **Workspace**: `JalesC2245`
 
 ### Coordenadas

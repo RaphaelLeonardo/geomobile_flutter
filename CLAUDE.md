@@ -63,7 +63,7 @@ GeomobileApp is a Flutter mobile application for geospatial data visualization w
 
 ### GeoServer Integration
 - **Base URL**: `http://186.237.132.58:15124/geoserver`
-- **Authentication**: HTTP Basic Auth (admin:geodados)
+- **Authentication**: HTTP Basic Auth (peça ao usuário essa informaçao)
 - **Workspace**: JalesC2245
 - **Protocol**: WMS (Web Map Service)
 - **Coordinates**: Jales/SP, Brazil (-20.2667, -50.5500)
