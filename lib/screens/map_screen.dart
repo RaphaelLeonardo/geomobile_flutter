@@ -59,9 +59,29 @@ class _MapScreenState extends State<MapScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Camadas - Workspace JalesC2245',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF084783)),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Camadas - Workspace JalesC2245',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF084783)),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0083e2),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Text(
+                    '${_activeLayers.length} ativas',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 16),
             if (_loading)
@@ -82,32 +102,66 @@ class _MapScreenState extends State<MapScreen> {
                   itemCount: _layers.length,
                   itemBuilder: (context, index) {
                     final layer = _layers[index];
-                    return ListTile(
-                      title: Text(layer.title),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Nome: ${layer.name}'),
-                          Text('Workspace: ${layer.workspace}', 
-                            style: const TextStyle(
-                              fontSize: 12, 
-                              color: Color(0xFF084783),
-                              fontWeight: FontWeight.bold,
+                    final isActive = _activeLayers.any((l) => l.name == layer.name);
+                    
+                    return Card(
+                      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                      child: ListTile(
+                        title: Text(
+                          layer.title,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w500,
+                            color: isActive ? const Color(0xFF084783) : Colors.black87,
+                          ),
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Nome: ${layer.name}'),
+                            Text('Workspace: ${layer.workspace}', 
+                              style: const TextStyle(
+                                fontSize: 12, 
+                                color: Color(0xFF084783),
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
-                          ),
-                        ],
+                            if (isActive)
+                              Container(
+                                margin: const EdgeInsets.only(top: 4),
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF084783),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: const Text(
+                                  'ATIVA',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.info_outline, size: 20),
+                              onPressed: () => _testLayerUrl(layer),
+                              color: const Color(0xFF084783),
+                            ),
+                            Switch(
+                              value: isActive,
+                              onChanged: (value) => _toggleLayer(layer),
+                              activeColor: const Color(0xFF0083e2),
+                              activeTrackColor: const Color(0xFF0083e2).withOpacity(0.3),
+                            ),
+                          ],
+                        ),
+                        onTap: () => _toggleLayer(layer),
                       ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.info, color: Color(0xFF084783)),
-                            onPressed: () => _testLayerUrl(layer),
-                          ),
-                          const Icon(Icons.add, color: Color(0xFF0083e2)),
-                        ],
-                      ),
-                      onTap: () => _addLayerToMap(layer),
                     );
                   },
                 ),
@@ -145,19 +199,25 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  void _addLayerToMap(Layer layer) {
+  void _toggleLayer(Layer layer) {
     setState(() {
-      _activeLayers.add(layer);
+      final isActive = _activeLayers.any((l) => l.name == layer.name);
+      if (isActive) {
+        _activeLayers.removeWhere((l) => l.name == layer.name);
+      } else {
+        _activeLayers.add(layer);
+      }
     });
 
-    print('Camada adicionada: ${layer.name}');
+    final isActive = _activeLayers.any((l) => l.name == layer.name);
+    print('Camada ${isActive ? 'adicionada' : 'removida'}: ${layer.name}');
     print('Total de camadas ativas: ${_activeLayers.length}');
 
-    Navigator.pop(context);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Camada ${layer.title} adicionada (${_activeLayers.length} ativas)'),
-        backgroundColor: const Color(0xFF084783),
+        content: Text('Camada ${layer.title} ${isActive ? 'ativada' : 'desativada'} (${_activeLayers.length} ativas)'),
+        backgroundColor: isActive ? const Color(0xFF084783) : const Color(0xFF666666),
+        duration: const Duration(seconds: 2),
       ),
     );
   }
