@@ -4,7 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Flutter mobile application project named "geomobile" configured for cross-platform development (Android, iOS, Web, Windows, macOS, Linux).
+GeomobileApp is a Flutter mobile application for geospatial data visualization with GeoServer integration. The app displays interactive maps with WMS layers from a specific GeoServer workspace (JalesC2245) centered on Jales/SP, Brazil.
+
+### Key Features
+- Interactive map visualization using flutter_map
+- WMS layer integration with GeoServer
+- Real-time layer toggle (on/off) functionality
+- OpenStreetMap as base map service
+- Layer management modal with status indicators
 
 ## Development Commands
 
@@ -38,9 +45,28 @@ This is a Flutter mobile application project named "geomobile" configured for cr
 - Uses Material Design components (`uses-material-design: true`)
 
 ### Dependencies
-- Core Flutter framework with Material Design
+- `flutter_map: ^7.0.2` - Native Flutter mapping library (no WebView/JavaScript)
+- `latlong2: ^0.9.1` - Coordinate manipulation
+- `http: ^1.1.0` - HTTP requests for GeoServer
+- `xml: ^6.3.0` - XML parsing for WMS GetCapabilities
+- `proj4dart: ^2.1.0` - Coordinate projection transformations
 - `flutter_lints` for code quality enforcement
-- Standard Flutter testing framework
+
+### Mapping Technology
+- **flutter_map**: Flutter-native mapping solution
+  - Dart/Flutter native (no WebView or JavaScript)
+  - API inspired by Leaflet
+  - Widget-based rendering
+  - Native WMS/TMS support
+- **OpenStreetMap**: Free, open-source base map tiles
+- **Web Mercator (EPSG:3857)**: Standard projection for web mapping
+
+### GeoServer Integration
+- **Base URL**: `http://186.237.132.58:15124/geoserver`
+- **Authentication**: HTTP Basic Auth (admin:geodados)
+- **Workspace**: JalesC2245
+- **Protocol**: WMS (Web Map Service)
+- **Coordinates**: Jales/SP, Brazil (-20.2667, -50.5500)
 
 ### Code Quality
 - Follows `flutter_lints` rules as defined in `analysis_options.yaml`
