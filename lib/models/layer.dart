@@ -1,3 +1,5 @@
+import 'package:xml/xml.dart';
+
 class Layer {
   final String name;
   final String title;
@@ -13,9 +15,12 @@ class Layer {
     this.boundingBox,
   });
 
-  factory Layer.fromXml(dynamic layerElement, String baseUrl) {
-    final name = layerElement.findElements('Name').first.text;
-    final title = layerElement.findElements('Title').first.text;
+  factory Layer.fromXml(XmlElement layerElement, String baseUrl) {
+    final nameElement = layerElement.findElements('Name');
+    final titleElement = layerElement.findElements('Title');
+    
+    final name = nameElement.isNotEmpty ? nameElement.first.innerText : 'Unknown';
+    final title = titleElement.isNotEmpty ? titleElement.first.innerText : name;
     final workspace = name.contains(':') ? name.split(':')[0] : '';
     
     return Layer(

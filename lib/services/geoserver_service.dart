@@ -1,28 +1,52 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:xml/xml.dart';
 import '../models/layer.dart';
 
 class GeoServerService {
   final String baseUrl;
+  final String username;
+  final String password;
 
-  GeoServerService({required this.baseUrl});
+  GeoServerService({
+    required this.baseUrl,
+    this.username = 'admin',
+    this.password = 'geodados',
+  });
+
+  String get _basicAuth {
+    final credentials = base64Encode(utf8.encode('$username:$password'));
+    return 'Basic $credentials';
+  }
 
   Future<List<Layer>> getCapabilities() async {
     try {
       final url = '$baseUrl/wms?service=WMS&version=1.1.0&request=GetCapabilities';
-      final response = await http.get(Uri.parse(url));
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Authorization': _basicAuth,
+        },
+      );
 
       if (response.statusCode == 200) {
         final document = XmlDocument.parse(response.body);
         final layers = <Layer>[];
 
-        final layerElements = document.findAllElements('Layer').where(
-          (element) => element.findElements('Name').isNotEmpty,
-        );
-
+        // Busca por todas as camadas (Layer) que possuem um elemento Name
+        final layerElements = document.findAllElements('Layer');
+        
         for (final layerElement in layerElements) {
-          layers.add(Layer.fromXml(layerElement, baseUrl));
+          final nameElements = layerElement.findElements('Name');
+          if (nameElements.isNotEmpty) {
+            try {
+              layers.add(Layer.fromXml(layerElement, baseUrl));
+            } catch (e) {
+              print('Erro ao processar camada: $e');
+              continue;
+            }
+          }
         }
 
         return layers;
@@ -30,6 +54,7 @@ class GeoServerService {
         throw Exception('Falha ao carregar capabilities: ${response.statusCode}');
       }
     } catch (e) {
+      print('Erro detalhado: $e');
       throw Exception('Erro ao conectar com GeoServer: $e');
     }
   }
@@ -43,7 +68,10 @@ class GeoServerService {
     required int height,
     String srs = 'EPSG:4326',
   }) {
-    return '$baseUrl/wms?'
+    final credentials = Uri.encodeComponent('$username:$password');
+    final baseUrlWithAuth = baseUrl.replaceFirst('http://', 'http://$credentials@');
+    
+    return '$baseUrlWithAuth/wms?'
         'service=WMS&'
         'version=1.1.0&'
         'request=GetMap&'
