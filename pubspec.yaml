@@ -13,6 +13,7 @@ dependencies:
   latlong2: ^0.9.1
   http: ^1.1.0
   xml: ^6.3.0
+  proj4dart: ^2.1.0
 
 dev_dependencies:
   flutter_test:

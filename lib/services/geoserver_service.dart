@@ -41,7 +41,11 @@ class GeoServerService {
           final nameElements = layerElement.findElements('Name');
           if (nameElements.isNotEmpty) {
             try {
-              layers.add(Layer.fromXml(layerElement, baseUrl));
+              final layer = Layer.fromXml(layerElement, baseUrl);
+              // Filtrar apenas camadas do workspace JalesC2245
+              if (layer.name.startsWith('JalesC2245:') || layer.workspace == 'JalesC2245') {
+                layers.add(layer);
+              }
             } catch (e) {
               print('Erro ao processar camada: $e');
               continue;

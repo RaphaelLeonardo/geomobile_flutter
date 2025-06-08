@@ -3,6 +3,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../services/geoserver_service.dart';
 import '../models/layer.dart';
+import '../widgets/wms_layer.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -59,8 +60,8 @@ class _MapScreenState extends State<MapScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Camadas Disponíveis',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              'Camadas - Workspace JalesC2245',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF084783)),
             ),
             const SizedBox(height: 16),
             if (_loading)
@@ -83,8 +84,29 @@ class _MapScreenState extends State<MapScreen> {
                     final layer = _layers[index];
                     return ListTile(
                       title: Text(layer.title),
-                      subtitle: Text(layer.name),
-                      trailing: const Icon(Icons.add),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Nome: ${layer.name}'),
+                          Text('Workspace: ${layer.workspace}', 
+                            style: const TextStyle(
+                              fontSize: 12, 
+                              color: Color(0xFF084783),
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.info, color: Color(0xFF084783)),
+                            onPressed: () => _testLayerUrl(layer),
+                          ),
+                          const Icon(Icons.add, color: Color(0xFF0083e2)),
+                        ],
+                      ),
                       onTap: () => _addLayerToMap(layer),
                     );
                   },
@@ -96,14 +118,47 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  void _testLayerUrl(Layer layer) {
+    // Coordenadas corretas para Jales/SP em EPSG:31982 (UTM)
+    final testUrl = 'http://admin:geodados@186.237.132.58:15124/geoserver/wms?'
+        'service=WMS&'
+        'version=1.1.0&'
+        'request=GetMap&'
+        'layers=${Uri.encodeComponent(layer.name)}&'
+        'styles=&'
+        'bbox=600000,7760000,620000,7780000&'  // Bbox em UTM para região de Jales
+        'width=512&'
+        'height=512&'
+        'crs=EPSG%3A31982&'  // EPSG:31982 para Jales/SP
+        'format=image%2Fjpeg&'  // JPEG mais compatível
+        'transparent=false';
+    
+    print('URL de teste para ${layer.name}:');
+    print(testUrl);
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('URL de teste para ${layer.title} gerada no console'),
+        backgroundColor: const Color(0xFF0083e2),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
   void _addLayerToMap(Layer layer) {
     setState(() {
       _activeLayers.add(layer);
     });
 
+    print('Camada adicionada: ${layer.name}');
+    print('Total de camadas ativas: ${_activeLayers.length}');
+
     Navigator.pop(context);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Camada ${layer.title} adicionada')),
+      SnackBar(
+        content: Text('Camada ${layer.title} adicionada (${_activeLayers.length} ativas)'),
+        backgroundColor: const Color(0xFF084783),
+      ),
     );
   }
 
@@ -130,8 +185,8 @@ class _MapScreenState extends State<MapScreen> {
           FlutterMap(
             mapController: _mapController,
             options: const MapOptions(
-              initialCenter: LatLng(-15.7942, -47.8822), // Brasília
-              initialZoom: 10.0,
+              initialCenter: LatLng(-20.2667, -50.5500), // Jales/SP
+              initialZoom: 12.0,
               minZoom: 3.0,
               maxZoom: 18.0,
             ),
@@ -140,20 +195,10 @@ class _MapScreenState extends State<MapScreen> {
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.example.geomobile',
               ),
-              ..._activeLayers.map((layer) => TileLayer(
-                urlTemplate: '${layer.url}/wms?'
-                    'service=WMS&'
-                    'version=1.1.0&'
-                    'request=GetMap&'
-                    'layers=${layer.name}&'
-                    'styles=&'
-                    'bbox={west},{south},{east},{north}&'
-                    'width={width}&'
-                    'height={height}&'
-                    'srs=EPSG:4326&'
-                    'format=image/png&'
-                    'transparent=true',
-              )),
+              ..._activeLayers.map((layer) {
+                print('Renderizando camada: ${layer.name}');
+                return WMSLayerWidget(layer: layer);
+              }),
             ],
           ),
           Positioned(
@@ -207,8 +252,8 @@ class _MapScreenState extends State<MapScreen> {
             heroTag: "location",
             onPressed: () {
               _mapController.move(
-                const LatLng(-15.7942, -47.8822),
-                10.0,
+                const LatLng(-20.2667, -50.5500),
+                12.0,
               );
             },
             backgroundColor: const Color(0xFF0083e2),
