@@ -53,120 +53,128 @@ class _MapScreenState extends State<MapScreen> {
   void _showLayersDrawer() {
     showModalBottomSheet(
       context: context,
-      builder: (context) => Container(
-        height: MediaQuery.of(context).size.height * 0.7,
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Camadas - Workspace JalesC2245',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF084783)),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0083e2),
-                    borderRadius: BorderRadius.circular(16),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Container(
+          height: MediaQuery.of(context).size.height * 0.7,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Camadas - Workspace JalesC2245',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF084783)),
                   ),
-                  child: Text(
-                    '${_activeLayers.length} ativas',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0083e2),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Text(
+                      '${_activeLayers.length} ativas',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            if (_loading)
-              const Center(child: CircularProgressIndicator())
-            else if (_error != null)
-              Column(
-                children: [
-                  Text('Erro: $_error'),
-                  ElevatedButton(
-                    onPressed: _loadLayers,
-                    child: const Text('Tentar Novamente'),
-                  ),
                 ],
-              )
-            else
-              Expanded(
-                child: ListView.builder(
-                  itemCount: _layers.length,
-                  itemBuilder: (context, index) {
-                    final layer = _layers[index];
-                    final isActive = _activeLayers.any((l) => l.name == layer.name);
-                    
-                    return Card(
-                      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-                      child: ListTile(
-                        title: Text(
-                          layer.title,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w500,
-                            color: isActive ? const Color(0xFF084783) : Colors.black87,
-                          ),
-                        ),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Nome: ${layer.name}'),
-                            Text('Workspace: ${layer.workspace}', 
-                              style: const TextStyle(
-                                fontSize: 12, 
-                                color: Color(0xFF084783),
-                                fontWeight: FontWeight.bold,
-                              ),
+              ),
+              const SizedBox(height: 16),
+              if (_loading)
+                const Center(child: CircularProgressIndicator())
+              else if (_error != null)
+                Column(
+                  children: [
+                    Text('Erro: $_error'),
+                    ElevatedButton(
+                      onPressed: _loadLayers,
+                      child: const Text('Tentar Novamente'),
+                    ),
+                  ],
+                )
+              else
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: _layers.length,
+                    itemBuilder: (context, index) {
+                      final layer = _layers[index];
+                      final isActive = _activeLayers.any((l) => l.name == layer.name);
+                      
+                      return Card(
+                        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                        child: ListTile(
+                          title: Text(
+                            layer.title,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w500,
+                              color: isActive ? const Color(0xFF084783) : Colors.black87,
                             ),
-                            if (isActive)
-                              Container(
-                                margin: const EdgeInsets.only(top: 4),
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF084783),
-                                  borderRadius: BorderRadius.circular(12),
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Nome: ${layer.name}'),
+                              Text('Workspace: ${layer.workspace}', 
+                                style: const TextStyle(
+                                  fontSize: 12, 
+                                  color: Color(0xFF084783),
+                                  fontWeight: FontWeight.bold,
                                 ),
-                                child: const Text(
-                                  'ATIVA',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
+                              ),
+                              if (isActive)
+                                Container(
+                                  margin: const EdgeInsets.only(top: 4),
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF084783),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: const Text(
+                                    'ATIVA',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                 ),
+                            ],
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.info_outline, size: 20),
+                                onPressed: () => _testLayerUrl(layer),
+                                color: const Color(0xFF084783),
                               ),
-                          ],
+                              Switch(
+                                value: isActive,
+                                onChanged: (value) {
+                                  _toggleLayer(layer);
+                                  setModalState(() {}); // Atualiza o modal em tempo real
+                                },
+                                activeColor: const Color(0xFF0083e2),
+                                activeTrackColor: const Color(0xFF0083e2).withOpacity(0.3),
+                              ),
+                            ],
+                          ),
+                          onTap: () {
+                            _toggleLayer(layer);
+                            setModalState(() {}); // Atualiza o modal em tempo real
+                          },
                         ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.info_outline, size: 20),
-                              onPressed: () => _testLayerUrl(layer),
-                              color: const Color(0xFF084783),
-                            ),
-                            Switch(
-                              value: isActive,
-                              onChanged: (value) => _toggleLayer(layer),
-                              activeColor: const Color(0xFF0083e2),
-                              activeTrackColor: const Color(0xFF0083e2).withOpacity(0.3),
-                            ),
-                          ],
-                        ),
-                        onTap: () => _toggleLayer(layer),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
