@@ -18,6 +18,7 @@ class CachedWMSLayerWidget extends StatelessWidget {
     print('Criando TileLayer Cached para: ${layer.name}');
 
     return TileLayer(
+      urlTemplate: 'cached://{z}/{x}/{y}', // Placeholder URL para TileProvider customizado
       tileProvider: CachedTileProvider(layerName: layer.name),
       tileSize: 256,
     );

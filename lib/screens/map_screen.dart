@@ -555,17 +555,11 @@ class _MapScreenState extends State<MapScreen> {
                   userAgentPackageName: 'com.example.geomobile',
                 )
               else
-                // Fundo simples quando offline
-                TileLayer(
-                  urlTemplate: 'about:blank', // URL inválida para forçar fallback
-                  backgroundColor: const Color(0xFFF0F0F0),
-                  errorTileCallback: (tile, error, stackTrace) {
-                    return Container(
-                      width: 256,
-                      height: 256,
-                      color: const Color(0xFFF0F0F0),
-                    );
-                  },
+                // Container de fundo cinza quando offline (sem mapa base)
+                Container(
+                  width: double.infinity,
+                  height: double.infinity,
+                  color: const Color(0xFFF0F0F0),
                 ),
               ..._activeLayers.map((layer) {
                 print('Renderizando camada: ${layer.name} (${_isOnline ? 'online' : 'offline'})');
