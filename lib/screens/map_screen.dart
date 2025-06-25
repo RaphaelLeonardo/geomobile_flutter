@@ -1,11 +1,15 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:path_provider/path_provider.dart';
 import '../services/geoserver_service.dart';
 import '../models/layer.dart';
 import '../widgets/wms_layer.dart';
 import '../widgets/cached_wms_layer.dart';
+import '../widgets/offline_vector_layer.dart';
 import '../services/offline_cache_service.dart';
+import '../services/offline_vector_service.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -74,37 +78,71 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _loadOfflineLayers() async {
     final offlineLayers = <Layer>[];
     
-    // Se não tem camadas online carregadas, criar camadas básicas dos caches existentes
-    if (_layers.isEmpty && !_isOnline) {
-      final db = await OfflineCacheService.database;
-      final cachedLayerNames = await db.rawQuery(
-        'SELECT DISTINCT layer_name FROM cached_tiles'
-      );
-      
-      for (final row in cachedLayerNames) {
-        final layerName = row['layer_name'] as String;
-        final layer = Layer(
-          name: layerName,
-          title: layerName.split(':').last.replaceAll('_', ' '),
-          workspace: layerName.split(':').first,
-          url: 'http://186.237.132.58:15124/geoserver',
-        );
-        offlineLayers.add(layer);
-      }
-    } else {
-      // Lógica normal: verificar quais das camadas online têm cache
+    if (_layers.isNotEmpty) {
+      // Se tem camadas online carregadas, verificar quais têm cache (tiles ou features)
       for (final layer in _layers) {
-        final hasOfflineData = await OfflineCacheService.hasOfflineData(layer.name);
-        if (hasOfflineData) {
+        final hasOfflineTiles = await OfflineCacheService.hasOfflineData(layer.name);
+        final hasOfflineFeatures = await OfflineVectorService.hasOfflineData(layer.name);
+        
+        if (hasOfflineTiles || hasOfflineFeatures) {
           offlineLayers.add(layer);
         }
       }
+    } else {
+      // Se não tem camadas online (modo offline), buscar camadas com cache
+      final cachedLayers = await _discoverCachedLayers();
+      offlineLayers.addAll(cachedLayers);
     }
     
     if (mounted) {
       setState(() {
         _offlineLayers = offlineLayers;
       });
+    }
+  }
+  
+  Future<List<Layer>> _discoverCachedLayers() async {
+    try {
+      final layers = <Layer>[];
+      final layerNames = <String>{};
+      
+      // Descobrir camadas com tiles (sistema antigo)
+      final appDir = await getApplicationDocumentsDirectory();
+      final tilesDir = Directory('${appDir.path}/tiles');
+      
+      if (await tilesDir.exists()) {
+        await for (final entity in tilesDir.list()) {
+          if (entity is Directory) {
+            final dirName = entity.path.split('/').last;
+            final layerName = dirName.replaceAll('_', ':');
+            
+            final hasData = await OfflineCacheService.hasOfflineData(layerName);
+            if (hasData) {
+              layerNames.add(layerName);
+            }
+          }
+        }
+      }
+      
+      // Descobrir camadas com features (sistema novo)
+      final availableFeatureLayers = await OfflineVectorService.getAvailableOfflineLayers();
+      layerNames.addAll(availableFeatureLayers);
+      
+      // Criar objetos Layer
+      for (final layerName in layerNames) {
+        final layer = Layer(
+          name: layerName,
+          title: layerName.split(':').last.replaceAll('_', ' '),
+          workspace: layerName.contains(':') ? layerName.split(':').first : 'default',
+          url: 'http://186.237.132.58:15124/geoserver',
+        );
+        layers.add(layer);
+      }
+      
+      return layers;
+    } catch (e) {
+      print('Erro ao descobrir camadas cached: $e');
+      return [];
     }
   }
 
@@ -317,13 +355,19 @@ class _MapScreenState extends State<MapScreen> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               if (_isOnline)
-                                FutureBuilder<bool>(
-                                  future: OfflineCacheService.hasOfflineData(layer.name),
+                                FutureBuilder<List<bool>>(
+                                  future: Future.wait([
+                                    OfflineCacheService.hasOfflineData(layer.name),
+                                    OfflineVectorService.hasOfflineData(layer.name),
+                                  ]),
                                   builder: (context, snapshot) {
-                                    final hasCache = snapshot.data == true;
+                                    final hasTileCache = snapshot.data?[0] == true;
+                                    final hasFeatureCache = snapshot.data?[1] == true;
+                                    final hasAnyCache = hasTileCache || hasFeatureCache;
+                                    
                                     return IconButton(
                                       onPressed: isDownloading ? null : () async {
-                                        if (hasCache) {
+                                        if (hasAnyCache) {
                                           _clearLayerCache(layer);
                                         } else {
                                           _downloadLayer(layer);
@@ -331,10 +375,12 @@ class _MapScreenState extends State<MapScreen> {
                                         setModalState(() {});
                                       },
                                       icon: Icon(
-                                        hasCache ? Icons.delete : Icons.download,
-                                        color: hasCache ? Colors.red : const Color(0xFF0083e2),
+                                        hasAnyCache ? Icons.delete : Icons.download,
+                                        color: hasAnyCache ? Colors.red : const Color(0xFF0083e2),
                                       ),
-                                      tooltip: hasCache ? 'Limpar cache' : 'Baixar para offline',
+                                      tooltip: hasAnyCache 
+                                        ? 'Limpar cache${hasFeatureCache ? ' (WFS)' : ' (WMS)'}' 
+                                        : 'Baixar WFS para offline',
                                     );
                                   },
                                 ),
@@ -432,8 +478,10 @@ class _MapScreenState extends State<MapScreen> {
     });
 
     try {
-      await OfflineCacheService.downloadLayerTiles(
+      // Usar novo sistema WFS em vez de tiles WMS
+      await OfflineVectorService.downloadLayerFeatures(
         layer,
+        _geoServerService,
         onProgress: (current, total) {
           if (mounted) {
             setState(() {
@@ -447,10 +495,15 @@ class _MapScreenState extends State<MapScreen> {
 
       if (mounted) {
         _loadOfflineLayers(); // Atualiza lista de camadas offline
+        
+        // Verificar quantas features foram baixadas
+        final featureCount = await OfflineVectorService.getCachedFeatureCount(layer.name);
+        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Download da camada ${layer.title} concluído!'),
+            content: Text('Download WFS concluído! ${layer.title}: $featureCount features'),
             backgroundColor: const Color(0xFF084783),
+            duration: const Duration(seconds: 4),
           ),
         );
       }
@@ -458,8 +511,9 @@ class _MapScreenState extends State<MapScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro no download: $e'),
+            content: Text('Erro no download WFS: $e'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
           ),
         );
       }
@@ -476,7 +530,10 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _clearLayerCache(Layer layer) async {
+    // Limpar tanto cache de tiles antigo quanto features novas
     await OfflineCacheService.clearCache(layer.name);
+    await OfflineVectorService.clearCache(layer.name);
+    
     if (mounted) {
       _loadOfflineLayers(); // Atualiza lista de camadas offline
       setState(() {});
@@ -542,8 +599,8 @@ class _MapScreenState extends State<MapScreen> {
           FlutterMap(
             mapController: _mapController,
             options: const MapOptions(
-              initialCenter: LatLng(-20.2667, -50.5500), // Jales/SP
-              initialZoom: 12.0,
+              initialCenter: LatLng(-20.278330, -51.144775), // Centro das features
+              initialZoom: 14.0, // Zoom mais próximo para ver os lotes
               minZoom: 10.0,
               maxZoom: 18.0,
             ),
@@ -563,12 +620,13 @@ class _MapScreenState extends State<MapScreen> {
                 ),
               ..._activeLayers.map((layer) {
                 print('Renderizando camada: ${layer.name} (${_isOnline ? 'online' : 'offline'})');
+                
                 if (_isOnline) {
                   return WMSLayerWidget(layer: layer);
                 } else {
-                  // Só renderiza se tem cache offline
+                  // Modo offline: usar widget que decidirá entre features ou tiles
                   if (_offlineLayers.any((l) => l.name == layer.name)) {
-                    return CachedWMSLayerWidget(layer: layer);
+                    return _OfflineLayerRenderer(layer: layer);
                   } else {
                     return const SizedBox.shrink();
                   }
@@ -669,8 +727,110 @@ class _MapScreenState extends State<MapScreen> {
             backgroundColor: const Color(0xFF0083e2),
             child: const Icon(Icons.my_location, color: Colors.white),
           ),
+          const SizedBox(height: 10),
+          FloatingActionButton(
+            heroTag: "zoom_features",
+            onPressed: () {
+              // Tentar diferentes zooms e posições para encontrar as features
+              _testDifferentViews();
+            },
+            backgroundColor: const Color(0xFF084783),
+            child: const Icon(Icons.zoom_out_map, color: Colors.white),
+          ),
         ],
       ),
+    );
+  }
+
+  void _testDifferentViews() {
+    // Lista de localizações baseada nas COORDENADAS REAIS das features
+    final testLocations = [
+      // Centro calculado das features
+      {'name': 'Centro das Features', 'lat': -20.278330, 'lng': -51.144775, 'zoom': 12.0},
+      
+      // Bounds das features
+      {'name': 'Norte das Features', 'lat': -20.251300, 'lng': -51.144775, 'zoom': 14.0},
+      {'name': 'Sul das Features', 'lat': -20.305359, 'lng': -51.144775, 'zoom': 14.0},
+      
+      // Visão geral das features
+      {'name': 'Visão Geral Features', 'lat': -20.278330, 'lng': -51.144775, 'zoom': 10.0},
+      
+      // Zoom próximo nas features
+      {'name': 'Zoom Próximo Features', 'lat': -20.278330, 'lng': -51.144775, 'zoom': 16.0},
+    ];
+
+    int currentIndex = 0;
+
+    void moveToNext() {
+      if (currentIndex < testLocations.length) {
+        final location = testLocations[currentIndex];
+        
+        _mapController.move(
+          LatLng(location['lat'] as double, location['lng'] as double),
+          location['zoom'] as double,
+        );
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Testando: ${location['name']} (${currentIndex + 1}/${testLocations.length})'),
+            duration: const Duration(seconds: 2),
+            backgroundColor: const Color(0xFF084783),
+          ),
+        );
+
+        currentIndex++;
+        
+        if (currentIndex < testLocations.length) {
+          // Agendar próximo teste em 3 segundos
+          Future.delayed(const Duration(seconds: 3), moveToNext);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Teste concluído! Verificou todas as posições.'),
+              duration: Duration(seconds: 2),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      }
+    }
+
+    moveToNext();
+  }
+}
+
+class _OfflineLayerRenderer extends StatelessWidget {
+  final Layer layer;
+
+  const _OfflineLayerRenderer({required this.layer});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<bool>>(
+      future: Future.wait([
+        OfflineVectorService.hasOfflineData(layer.name),
+        OfflineCacheService.hasOfflineData(layer.name),
+      ]),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const SizedBox.shrink();
+        }
+
+        final hasFeatures = snapshot.data?[0] == true;
+        final hasTiles = snapshot.data?[1] == true;
+
+        if (hasFeatures) {
+          // Priorizar features (WFS) sobre tiles (WMS)
+          print('🎨 Renderizando camada vetorial offline: ${layer.name}');
+          return OfflineVectorLayerWidget(layer: layer);
+        } else if (hasTiles) {
+          // Fallback para tiles antigos
+          print('🗂️ Renderizando tiles offline: ${layer.name}');
+          return CachedWMSLayerWidget(layer: layer);
+        }
+
+        return const SizedBox.shrink();
+      },
     );
   }
 }

@@ -1,18 +1,15 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:math' as math;
-import 'package:flutter/foundation.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
-import 'package:sqflite/sqflite.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
 import '../models/layer.dart';
+import '../providers/offline_tile_provider.dart';
 
 class OfflineCacheService {
-  static Database? _database;
-  static const String _tableName = 'cached_tiles';
-  
-  // Área de Jales/SP em coordenadas Web Mercator
+  // Área de Jales/SP
   static const double _minLat = -20.3;
   static const double _maxLat = -20.2;
   static const double _minLng = -50.6;
@@ -20,37 +17,7 @@ class OfflineCacheService {
   
   // Níveis de zoom para cache
   static const int _minZoom = 10;
-  static const int _maxZoom = 18;
-
-  static Future<Database> get database async {
-    if (_database != null) return _database!;
-    _database = await _initDatabase();
-    return _database!;
-  }
-
-  static Future<Database> _initDatabase() async {
-    final documentsDirectory = await getApplicationDocumentsDirectory();
-    final path = '${documentsDirectory.path}/offline_cache.db';
-    
-    return await openDatabase(
-      path,
-      version: 1,
-      onCreate: (db, version) {
-        return db.execute('''
-          CREATE TABLE $_tableName(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            layer_name TEXT NOT NULL,
-            x INTEGER NOT NULL,
-            y INTEGER NOT NULL,
-            z INTEGER NOT NULL,
-            tile_data BLOB NOT NULL,
-            downloaded_at INTEGER NOT NULL,
-            UNIQUE(layer_name, x, y, z)
-          )
-        ''');
-      },
-    );
-  }
+  static const int _maxZoom = 16;
 
   static Future<bool> isOnline() async {
     final connectivityResult = await Connectivity().checkConnectivity();
@@ -62,14 +29,19 @@ class OfflineCacheService {
     Layer layer, 
     {Function(int current, int total)? onProgress}
   ) async {
-    final db = await database;
-    
     print('Iniciando download de tiles para: ${layer.name}');
+    
+    final tilesDir = await getTilesDirectory(layer.name);
+    
+    // Garantir que o diretório existe
+    if (!await tilesDir.exists()) {
+      await tilesDir.create(recursive: true);
+    }
     
     final tiles = <TileCoordinate>[];
     
-    // Calcular tiles necessários para a área de Jales com zoom limitado
-    for (int z = _minZoom; z <= 16; z++) { // Limita até zoom 16 por performance
+    // Gerar coordenadas dos tiles para a área de Jales
+    for (int z = _minZoom; z <= _maxZoom; z++) {
       final bounds = _latLngToTileBounds(_minLat, _minLng, _maxLat, _maxLng, z);
       for (int x = bounds.minX; x <= bounds.maxX; x++) {
         for (int y = bounds.minY; y <= bounds.maxY; y++) {
@@ -77,30 +49,46 @@ class OfflineCacheService {
         }
       }
     }
-
+    
     print('Total de tiles para download: ${tiles.length}');
     
     int downloaded = 0;
     int skipped = 0;
-    final total = tiles.length;
-
+    
     for (final tile in tiles) {
       try {
-        final exists = await _tileExists(db, layer.name, tile.x, tile.y, tile.z);
-        if (!exists) {
+        final tileFile = File('${tilesDir.path}/${tile.z}_${tile.x}_${tile.y}.png');
+        
+        if (!await tileFile.exists()) {
           final tileData = await _downloadTile(layer, tile);
           if (tileData != null && tileData.isNotEmpty) {
-            await _saveTile(db, layer.name, tile.x, tile.y, tile.z, tileData);
-            downloaded++;
+            // Validar se é uma imagem válida (verificar header PNG)
+            if (_isValidPng(tileData)) {
+              await tileFile.writeAsBytes(tileData);
+              downloaded++;
+              
+              // Verificar se o tile tem dados reais
+              final hasData = _tileHasRealData(tileData);
+              if (hasData) {
+                print('✓ Tile COM DADOS salvo: ${tile.z}_${tile.x}_${tile.y}.png (${tileData.length} bytes) 🎨');
+              } else {
+                print('○ Tile vazio salvo: ${tile.z}_${tile.x}_${tile.y}.png (${tileData.length} bytes)');
+              }
+            } else {
+              print('✗ Tile inválido: ${tile.z}_${tile.x}_${tile.y} - não é PNG válido');
+              skipped++;
+            }
           } else {
+            print('✗ Tile vazio: ${tile.z}_${tile.x}_${tile.y}');
             skipped++;
           }
         } else {
           skipped++;
         }
-        onProgress?.call(downloaded + skipped, total);
         
-        // Pequeno delay para não sobrecarregar o servidor
+        onProgress?.call(downloaded + skipped, tiles.length);
+        
+        // Pequeno delay para não sobrecarregar
         await Future.delayed(const Duration(milliseconds: 50));
       } catch (e) {
         print('Erro ao baixar tile ${tile.x},${tile.y},${tile.z}: $e');
@@ -108,19 +96,59 @@ class OfflineCacheService {
       }
     }
     
-    print('Download concluído: $downloaded novos, $skipped existentes/erro, $total total');
+    print('Download concluído: $downloaded novos, $skipped existentes/erro');
   }
 
-  static Future<bool> _tileExists(Database db, String layerName, int x, int y, int z) async {
-    final result = await db.query(
-      _tableName,
-      where: 'layer_name = ? AND x = ? AND y = ? AND z = ?',
-      whereArgs: [layerName, x, y, z],
-      limit: 1,
+  static TileLayer createTileLayerForOffline(String layerName) {
+    return TileLayer(
+      urlTemplate: 'cache://{z}/{x}/{y}',
+      tileProvider: OfflineTileProvider(layerName: layerName),
+      userAgentPackageName: 'com.example.geomobile',
     );
-    return result.isNotEmpty;
   }
 
+  static Future<bool> hasOfflineData(String layerName) async {
+    try {
+      final tilesDir = await getTilesDirectory(layerName);
+      if (!await tilesDir.exists()) return false;
+      
+      final files = await tilesDir.list().where((f) => f.path.endsWith('.png')).toList();
+      return files.isNotEmpty;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  static Future<int> getCachedTileCount(String layerName) async {
+    try {
+      final tilesDir = await getTilesDirectory(layerName);
+      if (!await tilesDir.exists()) return 0;
+      
+      final files = await tilesDir.list().where((f) => f.path.endsWith('.png')).toList();
+      return files.length;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  static Future<void> clearCache(String layerName) async {
+    try {
+      final tilesDir = await getTilesDirectory(layerName);
+      if (await tilesDir.exists()) {
+        await tilesDir.delete(recursive: true);
+        print('Cache limpo para: $layerName');
+      }
+    } catch (e) {
+      print('Erro ao limpar cache: $e');
+    }
+  }
+  
+  static Future<Directory> getTilesDirectory(String layerName) async {
+    final appDir = await getApplicationDocumentsDirectory();
+    final safeName = layerName.replaceAll(':', '_').replaceAll('/', '_');
+    return Directory('${appDir.path}/tiles/$safeName');
+  }
+  
   static Future<Uint8List?> _downloadTile(Layer layer, TileCoordinate tile) async {
     final bounds = _tileToLatLngBounds(tile.x, tile.y, tile.z);
     
@@ -139,86 +167,82 @@ class OfflineCacheService {
 
     try {
       final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200 && 
-          !response.body.contains('ServiceException')) {
+      if (response.statusCode == 200) {
+        final responseText = response.body;
+        
+        // Verificar se é uma resposta de erro
+        if (responseText.contains('ServiceException') || 
+            responseText.contains('java.io.IOException') ||
+            responseText.contains('<ows:ExceptionReport') ||
+            responseText.contains('<!DOCTYPE html>')) {
+          print('✗ Resposta de erro do servidor para tile ${tile.z}_${tile.x}_${tile.y}');
+          return null;
+        }
+        
+        // Verificar se tem dados suficientes para ser uma imagem
+        if (response.bodyBytes.length < 100) {
+          print('✗ Resposta muito pequena para tile ${tile.z}_${tile.x}_${tile.y}: ${response.bodyBytes.length} bytes');
+          return null;
+        }
+        
         return response.bodyBytes;
+      } else {
+        print('✗ Status HTTP ${response.statusCode} para tile ${tile.z}_${tile.x}_${tile.y}');
       }
     } catch (e) {
-      print('Erro ao baixar tile: $e');
+      print('✗ Erro ao baixar tile ${tile.z}_${tile.x}_${tile.y}: $e');
     }
     return null;
   }
-
-  static Future<void> _saveTile(Database db, String layerName, int x, int y, int z, Uint8List data) async {
-    await db.insert(
-      _tableName,
-      {
-        'layer_name': layerName,
-        'x': x,
-        'y': y,
-        'z': z,
-        'tile_data': data,
-        'downloaded_at': DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+  
+  static bool _isValidPng(Uint8List data) {
+    // Verificar header PNG: 89 50 4E 47 0D 0A 1A 0A
+    if (data.length < 8) return false;
+    
+    return data[0] == 0x89 &&
+           data[1] == 0x50 &&
+           data[2] == 0x4E &&
+           data[3] == 0x47 &&
+           data[4] == 0x0D &&
+           data[5] == 0x0A &&
+           data[6] == 0x1A &&
+           data[7] == 0x0A;
   }
-
+  
+  static bool _tileHasRealData(Uint8List data) {
+    // Contar variação nos bytes para detectar se há dados reais
+    var uniqueBytes = <int>{};
+    for (int i = 100; i < math.min(data.length, 1000); i += 10) {
+      uniqueBytes.add(data[i]);
+      if (uniqueBytes.length > 15) return true; // Muita variação = tem dados
+    }
+    return uniqueBytes.length > 8; // Alguma variação = provavelmente tem dados
+  }
+  
   static Future<Uint8List?> getCachedTile(String layerName, int x, int y, int z) async {
-    final db = await database;
-    final result = await db.query(
-      _tableName,
-      columns: ['tile_data'],
-      where: 'layer_name = ? AND x = ? AND y = ? AND z = ?',
-      whereArgs: [layerName, x, y, z],
-      limit: 1,
-    );
-
-    if (result.isNotEmpty) {
-      return result.first['tile_data'] as Uint8List;
+    try {
+      final tilesDir = await getTilesDirectory(layerName);
+      final tileFile = File('${tilesDir.path}/${z}_${x}_${y}.png');
+      
+      if (await tileFile.exists()) {
+        return await tileFile.readAsBytes();
+      }
+    } catch (e) {
+      print('Erro ao ler tile cached: $e');
     }
     return null;
   }
 
-  static Future<bool> hasOfflineData(String layerName) async {
-    final db = await database;
-    final result = await db.query(
-      _tableName,
-      where: 'layer_name = ?',
-      whereArgs: [layerName],
-      limit: 1,
-    );
-    return result.isNotEmpty;
-  }
-
-  static Future<int> getCachedTileCount(String layerName) async {
-    final db = await database;
-    final result = await db.rawQuery(
-      'SELECT COUNT(*) as count FROM $_tableName WHERE layer_name = ?',
-      [layerName],
-    );
-    return Sqflite.firstIntValue(result) ?? 0;
-  }
-
-  static Future<void> clearCache(String layerName) async {
-    final db = await database;
-    await db.delete(
-      _tableName,
-      where: 'layer_name = ?',
-      whereArgs: [layerName],
-    );
-  }
-
-  // Utilitários para conversão de coordenadas
+  // Utilitários de conversão de coordenadas
   static TileBounds _latLngToTileBounds(double minLat, double minLng, double maxLat, double maxLng, int zoom) {
     final minTile = _latLngToTile(minLat, minLng, zoom);
     final maxTile = _latLngToTile(maxLat, maxLng, zoom);
     
     return TileBounds(
-      minX: minTile.x < maxTile.x ? minTile.x : maxTile.x,
-      maxX: minTile.x > maxTile.x ? minTile.x : maxTile.x,
-      minY: minTile.y < maxTile.y ? minTile.y : maxTile.y,
-      maxY: minTile.y > maxTile.y ? minTile.y : maxTile.y,
+      minX: math.min(minTile.x, maxTile.x),
+      maxX: math.max(minTile.x, maxTile.x),
+      minY: math.min(minTile.y, maxTile.y),
+      maxY: math.max(minTile.y, maxTile.y),
     );
   }
 
@@ -241,6 +265,7 @@ class OfflineCacheService {
   }
 }
 
+// Classes auxiliares
 class TileCoordinate {
   final int x, y, z;
   TileCoordinate({required this.x, required this.y, required this.z});

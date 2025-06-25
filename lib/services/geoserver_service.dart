@@ -88,4 +88,95 @@ class GeoServerService {
         'format=image/png&'
         'transparent=true';
   }
+
+  Future<Map<String, dynamic>?> getFeatures(String layerName, {
+    double? minX,
+    double? minY, 
+    double? maxX,
+    double? maxY,
+    String srs = 'EPSG:4326',
+    int? maxFeatures,
+  }) async {
+    try {
+      String url = '$baseUrl/wfs?'
+          'service=WFS&'
+          'version=1.0.0&'
+          'request=GetFeature&'
+          'typeName=$layerName&'
+          'outputFormat=application/json';
+
+      if (minX != null && minY != null && maxX != null && maxY != null) {
+        url += '&bbox=$minX,$minY,$maxX,$maxY,$srs';
+      }
+
+      if (maxFeatures != null) {
+        url += '&maxFeatures=$maxFeatures';
+      }
+
+      print('🌐 WFS Request: $url');
+
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Authorization': _basicAuth,
+          'Accept': 'application/json',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final geoJson = jsonDecode(response.body) as Map<String, dynamic>;
+        
+        if (geoJson.containsKey('features')) {
+          final features = geoJson['features'] as List;
+          print('✅ WFS Success: ${features.length} features baixadas para $layerName');
+          return geoJson;
+        } else {
+          print('⚠️ WFS Response sem features para $layerName');
+          return null;
+        }
+      } else {
+        print('❌ WFS Error: ${response.statusCode} - ${response.body}');
+        return null;
+      }
+    } catch (e) {
+      print('❌ WFS Exception: $e');
+      return null;
+    }
+  }
+
+  Future<List<String>> getWfsCapabilities() async {
+    try {
+      final url = '$baseUrl/wfs?service=WFS&version=1.0.0&request=GetCapabilities';
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Authorization': _basicAuth,
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final document = XmlDocument.parse(response.body);
+        final featureTypes = <String>[];
+
+        final featureTypeElements = document.findAllElements('FeatureType');
+        for (final element in featureTypeElements) {
+          final nameElement = element.findElements('Name').firstOrNull;
+          if (nameElement != null) {
+            final name = nameElement.innerText;
+            if (name.startsWith('JalesC2245:')) {
+              featureTypes.add(name);
+            }
+          }
+        }
+
+        print('📋 WFS FeatureTypes encontrados: $featureTypes');
+        return featureTypes;
+      } else {
+        throw Exception('Falha ao carregar WFS capabilities: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Erro ao obter WFS capabilities: $e');
+      return [];
+    }
+  }
 }

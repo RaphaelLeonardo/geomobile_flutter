@@ -3,7 +3,10 @@
     "allow": [
       "Bash(flutter pub:*)",
       "Bash(mkdir:*)",
-      "Bash(flutter analyze:*)"
+      "Bash(flutter analyze:*)",
+      "Bash(ls:*)",
+      "WebFetch(domain:fmtc.jaffaketchup.dev)",
+      "WebFetch(domain:docs.fleaflet.dev)"
     ],
     "deny": []
   }
