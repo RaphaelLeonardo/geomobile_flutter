@@ -33,6 +33,11 @@ class OfflineVectorService {
     }
     
     try {
+      // Etapa 1: Iniciando requisição (10%)
+      onProgress?.call(1, 10);
+      print('📡 Fazendo requisição WFS...');
+      await Future.delayed(const Duration(milliseconds: 100)); // UI responsiva
+      
       // Fazer requisição WFS para a área de Jales/SP
       final geoJson = await geoServerService.getFeatures(
         layer.name,
@@ -43,15 +48,32 @@ class OfflineVectorService {
         srs: 'EPSG:4326',
       );
 
+      // Etapa 2: Requisição concluída (40%)
+      onProgress?.call(4, 10);
+      print('📦 Dados WFS recebidos, processando...');
+      await Future.delayed(const Duration(milliseconds: 200));
+
       if (geoJson != null && geoJson.containsKey('features')) {
         final features = geoJson['features'] as List;
         
         if (features.isNotEmpty) {
-          // Salvar GeoJSON completo
+          // Etapa 3: Processando features (60%)
+          onProgress?.call(6, 10);
+          print('🔄 Processando ${features.length} features...');
+          await Future.delayed(const Duration(milliseconds: 300));
+          
+          // Etapa 4: Salvando GeoJSON (80%)
+          onProgress?.call(8, 10);
+          print('💾 Salvando dados...');
+          await Future.delayed(const Duration(milliseconds: 200));
+          
           final featuresFile = File('${featuresDir.path}/features.geojson');
           await featuresFile.writeAsString(jsonEncode(geoJson));
           
-          // Salvar metadata
+          // Etapa 5: Salvando metadata (90%)
+          onProgress?.call(9, 10);
+          await Future.delayed(const Duration(milliseconds: 200));
+          
           final metadata = {
             'layerName': layer.name,
             'layerTitle': layer.title,
@@ -70,13 +92,14 @@ class OfflineVectorService {
           final metadataFile = File('${featuresDir.path}/metadata.json');
           await metadataFile.writeAsString(jsonEncode(metadata));
           
+          // Etapa 6: Concluído (100%)
+          onProgress?.call(10, 10);
+          await Future.delayed(const Duration(milliseconds: 100));
           print('✅ Download WFS concluído: ${features.length} features salvas para ${layer.name}');
           print('📍 Tipos de geometria: ${metadata['geometryTypes']}');
-          
-          onProgress?.call(1, 1); // 100% - download completo
         } else {
           print('⚠️ Nenhuma feature encontrada para ${layer.name} na área especificada');
-          onProgress?.call(1, 1);
+          onProgress?.call(10, 10);
         }
       } else {
         throw Exception('Resposta WFS inválida ou vazia');
