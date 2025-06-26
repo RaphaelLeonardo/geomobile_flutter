@@ -626,7 +626,7 @@ class _MapScreenState extends State<MapScreen> {
                 } else {
                   // Modo offline: usar widget que decidirá entre features ou tiles
                   if (_offlineLayers.any((l) => l.name == layer.name)) {
-                    return _OfflineLayerRenderer(layer: layer);
+                    return _OfflineLayerRenderer(layer: layer, mapController: _mapController);
                   } else {
                     return const SizedBox.shrink();
                   }
@@ -801,8 +801,9 @@ class _MapScreenState extends State<MapScreen> {
 
 class _OfflineLayerRenderer extends StatelessWidget {
   final Layer layer;
+  final MapController mapController;
 
-  const _OfflineLayerRenderer({required this.layer});
+  const _OfflineLayerRenderer({required this.layer, required this.mapController});
 
   @override
   Widget build(BuildContext context) {
@@ -822,7 +823,7 @@ class _OfflineLayerRenderer extends StatelessWidget {
         if (hasFeatures) {
           // Priorizar features (WFS) sobre tiles (WMS)
           print('🎨 Renderizando camada vetorial offline: ${layer.name}');
-          return OfflineVectorLayerWidget(layer: layer);
+          return OfflineVectorLayerWidget(layer: layer, mapController: mapController);
         } else if (hasTiles) {
           // Fallback para tiles antigos
           print('🗂️ Renderizando tiles offline: ${layer.name}');

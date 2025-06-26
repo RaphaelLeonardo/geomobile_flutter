@@ -7,8 +7,9 @@ import '../services/offline_vector_service.dart';
 
 class OfflineVectorLayerWidget extends StatefulWidget {
   final Layer layer;
+  final MapController? mapController; // Para viewport culling
 
-  const OfflineVectorLayerWidget({super.key, required this.layer});
+  const OfflineVectorLayerWidget({super.key, required this.layer, this.mapController});
 
   @override
   State<OfflineVectorLayerWidget> createState() => _OfflineVectorLayerWidgetState();
@@ -21,6 +22,9 @@ class _OfflineVectorLayerWidgetState extends State<OfflineVectorLayerWidget> {
   bool _loading = true;
   String? _error;
   
+  // Cache de coordenadas convertidas para evitar reprocessamento
+  final Map<String, LatLng> _coordinateCache = {};
+  
   // Bounds calculados das features
   double? _minLat, _maxLat, _minLng, _maxLng;
   
@@ -30,10 +34,7 @@ class _OfflineVectorLayerWidgetState extends State<OfflineVectorLayerWidget> {
   // Debug counter para polígonos
   int _debugPolygonCount = 0;
   
-  // SEM LIMITES - carregar camada INTEIRA como solicitado
-  // static const int MAX_POLYGONS_TO_RENDER = 2000; // REMOVIDO - sem limite
-  // static const double MIN_POLYGON_AREA = 0.0000000000001; // REMOVIDO - sem filtro de área  
-  // static const int SAMPLE_EVERY_N_FEATURES = 25; // REMOVIDO - sem sampling
+  // RENDERIZAÇÃO SIMPLES - deixar flutter_map otimizar nativamente
   int _totalFeaturesLoaded = 0;
   int _featuresRendered = 0;
 
@@ -78,9 +79,9 @@ class _OfflineVectorLayerWidgetState extends State<OfflineVectorLayerWidget> {
                   final polygon = _createPolygon(coordinates, properties);
                   if (polygon != null) {
                     polygons.add(polygon);
-                    // Log apenas os primeiros 5 para não poluir o console
-                    if (polygons.length <= 5) {
-                      print('✅ Polígono ${polygons.length} criado com ${polygon.points.length} pontos');
+                    // Log apenas do primeiro polígono para confirmar funcionamento
+                    if (polygons.length == 1) {
+                      print('✅ Primeiro polígono criado com ${polygon.points.length} pontos');
                     }
                   }
                   break;
@@ -119,6 +120,7 @@ class _OfflineVectorLayerWidgetState extends State<OfflineVectorLayerWidget> {
         
         if (mounted) {
           setState(() {
+            // RENDERIZAR TUDO DE UMA VEZ - deixar flutter_map otimizar
             _polygons = polygons;
             _polylines = polylines;
             _markers = markers;
@@ -126,8 +128,8 @@ class _OfflineVectorLayerWidgetState extends State<OfflineVectorLayerWidget> {
             _featuresRendered = polygons.length + polylines.length + markers.length;
           });
           
-          print('✅ TODAS as features carregadas: ${polygons.length} polígonos, ${polylines.length} linhas, ${markers.length} pontos');
-          print('📈 CAMADA COMPLETA: ${_featuresRendered}/${_totalFeaturesLoaded} features renderizadas (100%)');
+          print('✅ CAMADA OFFLINE CARREGADA: ${polygons.length} polígonos, ${polylines.length} linhas, ${markers.length} pontos');
+          print('📊 Cache de coordenadas: ${_coordinateCache.length} pontos únicos convertidos');
           
           // Log dos bounds calculados
           if (_minLat != null && _maxLat != null && _minLng != null && _maxLng != null) {
@@ -174,10 +176,7 @@ class _OfflineVectorLayerWidgetState extends State<OfflineVectorLayerWidget> {
             final x = (coord[0] as num).toDouble();
             final y = (coord[1] as num).toDouble();
             
-            // Log das primeiras coordenadas para debug
-            if (points.isEmpty) {
-              print('🔍 Primeira coordenada: x=$x, y=$y');
-            }
+            // Primeira coordenada apenas para debug inicial
             
             // Verificar se coordenadas estão em metros (UTM) ou graus
             if (x.abs() > 180 || y.abs() > 90) {
@@ -186,32 +185,20 @@ class _OfflineVectorLayerWidgetState extends State<OfflineVectorLayerWidget> {
               if (latLng != null) {
                 points.add(latLng);
                 _updateBounds(latLng.latitude, latLng.longitude);
-                
-                // Log da primeira conversão
-                if (points.length == 1) {
-                  print('🔄 Convertido UTM→LatLng: ${latLng.latitude}, ${latLng.longitude}');
-                }
               }
             } else {
               // Coordenadas já em graus decimais
               final latLng = LatLng(y, x); // Note: y=lat, x=lng
               points.add(latLng);
               _updateBounds(latLng.latitude, latLng.longitude);
-              
-              // Log da primeira coordenada em graus
-              if (points.length == 1) {
-                print('📍 Coordenada em graus: ${latLng.latitude}, ${latLng.longitude}');
-              }
             }
           }
         }
         
         if (points.length >= 3) {
-          // Debug dos primeiros polígonos apenas
-          if (_debugPolygonCount < 3) {
-            final area = _calculatePolygonArea(points);
-            print('🔍 Polígono debug: ${points.length} pontos, área: $area');
-            print('   Primeiro ponto: ${points.first.latitude}, ${points.first.longitude}');
+          // Debug limitado apenas para verificação inicial
+          if (_debugPolygonCount < 1) {
+            print('✅ Primeira conversão completa: ${points.length} pontos processados');
             _debugPolygonCount++;
           }
           
@@ -221,7 +208,8 @@ class _OfflineVectorLayerWidgetState extends State<OfflineVectorLayerWidget> {
             points: points,
             color: _getPolygonColor(properties).withOpacity(0.4),
             borderColor: _getPolygonBorderColor(properties),
-            borderStrokeWidth: 2.0, // Borda mais visível
+            borderStrokeWidth: 1.0, // Borda reduzida para performance (era 2.0)
+            // Sem outras propriedades de borda para máxima performance
           );
         }
       }
@@ -382,52 +370,42 @@ class _OfflineVectorLayerWidgetState extends State<OfflineVectorLayerWidget> {
     return area.abs() / 2.0;
   }
 
-  // Conversão mais precisa de UTM para Lat/Lng
-  // Para região de Jales/SP (UTM Zone 23S)
+  // Conversão CACHED de UTM para Lat/Lng - executa apenas uma vez por coordenada
   LatLng? _convertFromUTM(double x, double y) {
+    // Criar chave única para cache
+    final String cacheKey = '${x.toStringAsFixed(2)}_${y.toStringAsFixed(2)}';
+    
+    // Verificar se já foi convertida
+    if (_coordinateCache.containsKey(cacheKey)) {
+      return _coordinateCache[cacheKey]!;
+    }
+    
     try {
-      // Para região de Jales/SP - conversão específica
-      // Baseado nas coordenadas típicas da região
-      
-      // Se as coordenadas originais são aproximadamente:
-      // x: ~600000-620000 (easting)
-      // y: ~7750000-7780000 (northing)
-      
-      // Conversão aproximada para Jales/SP region
-      // Latitude aproximada: -20.2667 (referência conhecida)
-      // Longitude aproximada: -50.5500 (referência conhecida)
-      
-      // Fator de conversão específico para a região
-      const double refEasting = 610000.0;  // Referência aproximada para Jales
-      const double refNorthing = 7760000.0; // Referência aproximada para Jales
+      // Conversão otimizada para região de Jales/SP
+      const double refEasting = 610000.0;
+      const double refNorthing = 7760000.0; 
       const double refLat = -20.2667;
       const double refLng = -50.5500;
       
-      // Conversão baseada em deslocamento da referência conhecida
       final double deltaEasting = x - refEasting;
       final double deltaNorthing = y - refNorthing;
       
-      // Aproximadamente 111km por grau na latitude
       final double lat = refLat + (deltaNorthing / 111000.0);
-      
-      // Ajuste da longitude considerando a latitude
       final double lngDegreeDistance = 111000.0 * math.cos(refLat * math.pi / 180.0);
       final double lng = refLng + (deltaEasting / lngDegreeDistance);
       
-      // Debug da primeira conversão
+      // Debug apenas da primeira conversão
       if (_firstConversionLog) {
-        print('🗺️ Conversão UTM: x=$x, y=$y → lat=$lat, lng=$lng');
+        print('🗺️ Conversão UTM CACHED: x=$x, y=$y → lat=$lat, lng=$lng');
         _firstConversionLog = false;
       }
       
-      // Verificar se resultados são válidos para a região
-      if (lat >= -22 && lat <= -18 && lng >= -52 && lng <= -48) {
-        return LatLng(lat, lng);
-      } else {
-        print('⚠️ Coordenadas fora da região esperada: lat=$lat, lng=$lng');
-        // Ainda assim retorna para debug
-        return LatLng(lat, lng);
-      }
+      final LatLng result = LatLng(lat, lng);
+      
+      // Armazenar no cache para próximas utilizações
+      _coordinateCache[cacheKey] = result;
+      
+      return result;
     } catch (e) {
       print('❌ Erro na conversão UTM: $e');
       return null;
@@ -444,18 +422,27 @@ class _OfflineVectorLayerWidgetState extends State<OfflineVectorLayerWidget> {
       return const SizedBox.shrink(); // Não mostra erro visual
     }
 
-    print('🎨 Renderizando ${_polygons.length} polígonos, ${_polylines.length} linhas, ${_markers.length} pontos');
+    // Log otimizado apenas quando há mudança significativa
+    if (_polygons.length > 0) {
+      print('🎨 Renderizando ${_polygons.length} polígonos com performance otimizada');
+    }
 
-    // Renderizar polígonos reais agora que sabemos que funcionam!
-    print('🎨 Renderizando ${_polygons.length} polígonos REAIS no mapa!');
-
-    // Retorna múltiplas layers apenas para poucos polígonos
+    // RENDERIZAÇÃO OTIMIZADA - flutter_map nativo com todas as features
     return Stack(
       children: [
         if (_polygons.isNotEmpty)
-          PolygonLayer(polygons: _polygons),
+          PolygonLayer(
+            polygons: _polygons,
+            // ✅ MÁXIMA PERFORMANCE para grandes datasets:
+            useAltRendering: true, // Triangulação otimizada para 25k+ polígonos
+            simplificationTolerance: 1.5, // Simplificação mais agressiva para performance
+            polygonCulling: true, // Culling automático de polígonos fora da tela
+          ),
         if (_polylines.isNotEmpty)
-          PolylineLayer(polylines: _polylines),
+          PolylineLayer(
+            polylines: _polylines,
+            simplificationTolerance: 1.2,
+          ),
         if (_markers.isNotEmpty)
           MarkerLayer(markers: _markers),
       ],
