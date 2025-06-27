@@ -46,8 +46,8 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _startConnectivityMonitoring() {
-    // Verifica conectividade a cada 5 segundos
-    Future.delayed(const Duration(seconds: 5), () {
+    // Verifica conectividade a cada 30 segundos para reduzir rebuilds
+    Future.delayed(const Duration(seconds: 30), () {
       if (mounted) {
         _checkConnectivity();
         _startConnectivityMonitoring();
@@ -58,7 +58,9 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _checkConnectivity() async {
     final wasOnline = _isOnline;
     final isOnline = await OfflineCacheService.isOnline();
-    if (mounted) {
+    
+    // Só chama setState se o status mudou para evitar rebuilds desnecessários
+    if (mounted && wasOnline != isOnline) {
       setState(() {
         _isOnline = isOnline;
       });

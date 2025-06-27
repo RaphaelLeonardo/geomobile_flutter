@@ -422,10 +422,7 @@ class _OfflineVectorLayerWidgetState extends State<OfflineVectorLayerWidget> {
       return const SizedBox.shrink(); // Não mostra erro visual
     }
 
-    // Log otimizado apenas quando há mudança significativa
-    if (_polygons.length > 0) {
-      print('🎨 Renderizando ${_polygons.length} polígonos com performance otimizada');
-    }
+    // Print removido para evitar piscar - log apenas no initState/setState
 
     // RENDERIZAÇÃO OTIMIZADA - flutter_map nativo com todas as features
     return Stack(
